@@ -107,22 +107,10 @@ function espam_form_id(): int {
  * "Zatražite ponudu" form. The category select is preselected from ?kategorija= (links on the Asortiman page).
  */
 function espam_create_form(): void {
-	$cats  = implode( ' ', array_map( static fn( $c ) => '"' . $c[0] . '"', espam_categories() ) );
-	$body  = '<div class="ep-form__grid">' . "\n";
-	$body .= '<p><label>Ime i prezime *[text* ime autocomplete:name]</label></p>' . "\n";
-	$body .= '<p><label>Firma[text firma autocomplete:organization]</label></p>' . "\n";
-	$body .= '<p><label>Email *[email* email autocomplete:email]</label></p>' . "\n";
-	$body .= '<p><label>Telefon[tel telefon autocomplete:tel]</label></p>' . "\n";
-	$body .= "</div>\n";
-	$body .= "<p><label>Kategorija[select kategorija first_as_label default:get \"Izaberite kategoriju\" {$cats}]</label></p>\n";
-	$body .= '<p><label>Proizvodi i količine *[textarea* poruka placeholder "Npr. 10 laptopova 15,6 inča, 16 GB RAM; 5 multifunkcijskih štampača; rok isporuke…"]</label></p>' . "\n";
-	$body .= '<p class="ep-form__consent">[acceptance saglasnost] Saglasan/na sam da ESPAM PLUS koristi moje podatke kako bi mi poslao ponudu. [/acceptance]</p>' . "\n";
-	$body .= '<p>[submit "Pošaljite upit"]</p>';
-
 	$form = WPCF7_ContactForm::get_template( array( 'title' => 'Zatražite ponudu' ) );
 	$form->set_properties(
 		array(
-			'form'     => $body,
+			'form'     => espam_form_body(),
 			'mail'     => array(
 				'active'             => true,
 				'subject'            => 'Novi upit sa sajta: [kategorija]',
@@ -130,7 +118,7 @@ function espam_create_form(): void {
 				'recipient'          => '[_site_admin_email]',
 				'body'               => espam_inquiry_mail_body(),
 				'additional_headers' => 'Reply-To: [email]',
-				'attachments'        => '',
+				'attachments'        => '[prilog]',
 				'use_html'           => true,
 				'exclude_blank'      => true,
 			),
@@ -143,13 +131,54 @@ function espam_create_form(): void {
 					'invalid_required' => 'Ovo polje je obavezno.',
 					'accept_terms'     => 'Potrebna je vaša saglasnost.',
 					'invalid_email'    => 'Upišite ispravnu email adresu.',
-				)
+				),
+				espam_upload_messages()
 			),
 		)
 	);
 	$form->save();
 	update_option( 'espam_form_id', (int) $form->id() );
 }
+
+function espam_form_body(): string {
+	$cats  = implode( ' ', array_map( static fn( $c ) => '"' . $c[0] . '"', espam_categories() ) );
+	$body  = '<div class="ep-form__grid">' . "\n";
+	$body .= '<p><label>Ime i prezime *[text* ime autocomplete:name]</label></p>' . "\n";
+	$body .= '<p><label>Firma[text firma autocomplete:organization]</label></p>' . "\n";
+	$body .= '<p><label>Email *[email* email autocomplete:email]</label></p>' . "\n";
+	$body .= '<p><label>Telefon[tel telefon autocomplete:tel]</label></p>' . "\n";
+	$body .= "</div>\n";
+	$body .= "<p><label>Kategorija[select kategorija first_as_label default:get \"Izaberite kategoriju\" {$cats}]</label></p>\n";
+	$body .= '<p><label>Proizvodi i količine *[textarea* poruka placeholder "Npr. 10 laptopova 15,6 inča, 16 GB RAM; 5 multifunkcijskih štampača; rok isporuke…"]</label></p>' . "\n";
+	$body .= '<p class="ep-form__file"><label>Prilog — nije obavezan (specifikacija, spisak proizvoda…)[file ' . ESPAM_UPLOAD_FIELD . ' limit:10mb filetypes:' . ESPAM_UPLOAD_FILETYPES . ']</label><span class="ep-form__hint">PDF, Word (.docx), Excel (.xlsx), TXT ili slika (JPG, PNG), do 10 MB.</span></p>' . "\n";
+	$body .= '<p class="ep-form__consent">[acceptance saglasnost] Saglasan/na sam da ESPAM PLUS koristi moje podatke kako bi mi poslao ponudu. [/acceptance]</p>' . "\n";
+	$body .= '<p>[submit "Pošaljite upit"]</p>';
+	return $body;
+}
+
+function espam_upload_messages(): array {
+	return array(
+		'upload_failed'            => 'Prilog nije otpremljen. Pokušajte ponovo.',
+		'upload_file_type_invalid' => 'Ova vrsta fajla nije dozvoljena. Pošaljite PDF, Word (.docx), Excel (.xlsx), TXT ili sliku (JPG, PNG).',
+		'upload_file_too_large'    => 'Prilog je veći od 10 MB.',
+		'upload_failed_php_error'  => 'Prilog nije otpremljen. Pokušajte ponovo.',
+		'spam'                     => 'Previše upita u kratkom roku. Pokušajte ponovo kasnije ili nas pozovite telefonom.',
+	);
+}
+
+// The live form was created before the attachment field existed: always render the current fields and messages.
+add_filter(
+	'wpcf7_contact_form_property_form',
+	static fn( $body, $form ) => $form && (int) $form->id() === espam_form_id() ? espam_form_body() : $body,
+	10,
+	2
+);
+add_filter(
+	'wpcf7_contact_form_property_messages',
+	static fn( $messages, $form ) => $form && (int) $form->id() === espam_form_id() ? array_merge( (array) $messages, espam_upload_messages() ) : $messages,
+	10,
+	2
+);
 
 /**
  * Branded HTML body for the inquiry email. CF7 mail-tags; in HTML mode CF7 escapes the submitted values.
@@ -184,7 +213,8 @@ function espam_inquiry_mail_body(): string {
 		. $row( 'Firma', '[firma]' )
 		. $row( 'Email', '<a href="mailto:[email]" style="color:#0A65B8;text-decoration:none;">[email]</a>' )
 		. $row( 'Telefon', '<a href="tel:[telefon]" style="color:#0A65B8;text-decoration:none;">[telefon]</a>' )
-		. $row( 'Kategorija', '[kategorija]' ) . '</table>
+		. $row( 'Kategorija', '[kategorija]' )
+		. $row( 'Prilog', '[prilog] (u prilogu emaila)' ) . '</table>
 </td></tr>
 <tr><td style="padding:20px 28px 4px;">
 <p style="margin:0 0 8px;color:#5B6B80;font-size:13px;">Proizvodi i količine</p>
@@ -211,6 +241,7 @@ add_filter(
 			$mail['use_html']      = true;
 			$mail['exclude_blank'] = true;
 			$mail['body']          = espam_inquiry_mail_body();
+			$mail['attachments']   = '[prilog]';
 		}
 		return $mail;
 	},
